@@ -15,9 +15,9 @@ for imp in ["pandas._libs.lib", "pandas.lib"]:
 
 # Compatibility import for the testing module
 try:
-    import pandas._testing as tm  # noqa
+    import pandas._testing as tm
 except ImportError:
-    import pandas.util.testing as tm  # noqa
+    import pandas.util.testing as tm  # noqa: F401
 
 
 numeric_dtypes = [
@@ -33,7 +33,7 @@ numeric_dtypes = [
     np.uint8,
 ]
 datetime_dtypes = [np.datetime64, np.timedelta64]
-string_dtypes = [np.object]
+string_dtypes = [object]
 try:
     extension_dtypes = [
         pd.Int8Dtype,

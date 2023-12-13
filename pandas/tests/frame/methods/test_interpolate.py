@@ -1,14 +1,73 @@
 import numpy as np
 import pytest
 
+from pandas.errors import ChainedAssignmentError
 import pandas.util._test_decorators as td
 
-from pandas import DataFrame, Series, date_range
+from pandas import (
+    DataFrame,
+    NaT,
+    Series,
+    date_range,
+)
 import pandas._testing as tm
 
 
 class TestDataFrameInterpolate:
-    def test_interp_basic(self):
+    def test_interpolate_complex(self):
+        # GH#53635
+        ser = Series([complex("1+1j"), float("nan"), complex("2+2j")])
+        assert ser.dtype.kind == "c"
+
+        res = ser.interpolate()
+        expected = Series([ser[0], ser[0] * 1.5, ser[2]])
+        tm.assert_series_equal(res, expected)
+
+        df = ser.to_frame()
+        res = df.interpolate()
+        expected = expected.to_frame()
+        tm.assert_frame_equal(res, expected)
+
+    def test_interpolate_datetimelike_values(self, frame_or_series):
+        # GH#11312, GH#51005
+        orig = Series(date_range("2012-01-01", periods=5))
+        ser = orig.copy()
+        ser[2] = NaT
+
+        res = frame_or_series(ser).interpolate()
+        expected = frame_or_series(orig)
+        tm.assert_equal(res, expected)
+
+        # datetime64tz cast
+        ser_tz = ser.dt.tz_localize("US/Pacific")
+        res_tz = frame_or_series(ser_tz).interpolate()
+        expected_tz = frame_or_series(orig.dt.tz_localize("US/Pacific"))
+        tm.assert_equal(res_tz, expected_tz)
+
+        # timedelta64 cast
+        ser_td = ser - ser[0]
+        res_td = frame_or_series(ser_td).interpolate()
+        expected_td = frame_or_series(orig - orig[0])
+        tm.assert_equal(res_td, expected_td)
+
+    def test_interpolate_inplace(self, frame_or_series, using_array_manager, request):
+        # GH#44749
+        if using_array_manager and frame_or_series is DataFrame:
+            mark = pytest.mark.xfail(reason=".values-based in-place check is invalid")
+            request.applymarker(mark)
+
+        obj = frame_or_series([1, np.nan, 2])
+        orig = obj.values
+
+        obj.interpolate(inplace=True)
+        expected = frame_or_series([1, 1.5, 2])
+        tm.assert_equal(obj, expected)
+
+        # check we operated *actually* inplace
+        assert np.shares_memory(orig, obj.values)
+        assert orig.squeeze()[1] == 1.5
+
+    def test_interp_basic(self, using_copy_on_write):
         df = DataFrame(
             {
                 "A": [1, 2, np.nan, 4],
@@ -25,16 +84,31 @@ class TestDataFrameInterpolate:
                 "D": list("abcd"),
             }
         )
-        result = df.interpolate()
+        msg = "DataFrame.interpolate with object dtype"
+        with tm.assert_produces_warning(FutureWarning, match=msg):
+            result = df.interpolate()
         tm.assert_frame_equal(result, expected)
 
-        result = df.set_index("C").interpolate()
-        expected = df.set_index("C")
-        expected.loc[3, "A"] = 3
-        expected.loc[5, "B"] = 9
-        tm.assert_frame_equal(result, expected)
+        # check we didn't operate inplace GH#45791
+        cvalues = df["C"]._values
+        dvalues = df["D"].values
+        if using_copy_on_write:
+            assert np.shares_memory(cvalues, result["C"]._values)
+            assert np.shares_memory(dvalues, result["D"]._values)
+        else:
+            assert not np.shares_memory(cvalues, result["C"]._values)
+            assert not np.shares_memory(dvalues, result["D"]._values)
 
-    def test_interp_bad_method(self):
+        with tm.assert_produces_warning(FutureWarning, match=msg):
+            res = df.interpolate(inplace=True)
+        assert res is None
+        tm.assert_frame_equal(df, expected)
+
+        # check we DID operate inplace
+        assert np.shares_memory(df["C"]._values, cvalues)
+        assert np.shares_memory(df["D"]._values, dvalues)
+
+    def test_interp_basic_with_non_range_index(self):
         df = DataFrame(
             {
                 "A": [1, 2, np.nan, 4],
@@ -43,7 +117,39 @@ class TestDataFrameInterpolate:
                 "D": list("abcd"),
             }
         )
-        with pytest.raises(ValueError):
+
+        msg = "DataFrame.interpolate with object dtype"
+        with tm.assert_produces_warning(FutureWarning, match=msg):
+            result = df.set_index("C").interpolate()
+        expected = df.set_index("C")
+        expected.loc[3, "A"] = 3
+        expected.loc[5, "B"] = 9
+        tm.assert_frame_equal(result, expected)
+
+    def test_interp_empty(self):
+        # https://github.com/pandas-dev/pandas/issues/35598
+        df = DataFrame()
+        result = df.interpolate()
+        assert result is not df
+        expected = df
+        tm.assert_frame_equal(result, expected)
+
+    def test_interp_bad_method(self):
+        df = DataFrame(
+            {
+                "A": [1, 2, np.nan, 4],
+                "B": [1, 4, 9, np.nan],
+                "C": [1, 2, 3, 5],
+            }
+        )
+        msg = (
+            r"method must be one of \['linear', 'time', 'index', 'values', "
+            r"'nearest', 'zero', 'slinear', 'quadratic', 'cubic', "
+            r"'barycentric', 'krogh', 'spline', 'polynomial', "
+            r"'from_derivatives', 'piecewise_polynomial', 'pchip', 'akima', "
+            r"'cubicspline'\]. Got 'not_a_method' instead."
+        )
+        with pytest.raises(ValueError, match=msg):
             df.interpolate(method="not_a_method")
 
     def test_interp_combo(self):
@@ -60,18 +166,45 @@ class TestDataFrameInterpolate:
         expected = Series([1.0, 2.0, 3.0, 4.0], name="A")
         tm.assert_series_equal(result, expected)
 
-        result = df["A"].interpolate(downcast="infer")
+        msg = "The 'downcast' keyword in Series.interpolate is deprecated"
+        with tm.assert_produces_warning(FutureWarning, match=msg):
+            result = df["A"].interpolate(downcast="infer")
         expected = Series([1, 2, 3, 4], name="A")
         tm.assert_series_equal(result, expected)
+
+    def test_inerpolate_invalid_downcast(self):
+        # GH#53103
+        df = DataFrame(
+            {
+                "A": [1.0, 2.0, np.nan, 4.0],
+                "B": [1, 4, 9, np.nan],
+                "C": [1, 2, 3, 5],
+                "D": list("abcd"),
+            }
+        )
+
+        msg = "downcast must be either None or 'infer'"
+        msg2 = "The 'downcast' keyword in DataFrame.interpolate is deprecated"
+        msg3 = "The 'downcast' keyword in Series.interpolate is deprecated"
+        with pytest.raises(ValueError, match=msg):
+            with tm.assert_produces_warning(FutureWarning, match=msg2):
+                df.interpolate(downcast="int64")
+        with pytest.raises(ValueError, match=msg):
+            with tm.assert_produces_warning(FutureWarning, match=msg3):
+                df["A"].interpolate(downcast="int64")
 
     def test_interp_nan_idx(self):
         df = DataFrame({"A": [1, 2, np.nan, 4], "B": [np.nan, 2, 3, 4]})
         df = df.set_index("A")
-        with pytest.raises(NotImplementedError):
+        msg = (
+            "Interpolation with NaNs in the index has not been implemented. "
+            "Try filling those NaNs before interpolating."
+        )
+        with pytest.raises(NotImplementedError, match=msg):
             df.interpolate(method="values")
 
-    @td.skip_if_no_scipy
     def test_interp_various(self):
+        pytest.importorskip("scipy")
         df = DataFrame(
             {"A": [1, 2, np.nan, 4, 5, np.nan, 7], "C": [1, 2, 3, 5, 8, 13, 21]}
         )
@@ -79,38 +212,38 @@ class TestDataFrameInterpolate:
         expected = df.copy()
         result = df.interpolate(method="polynomial", order=1)
 
-        expected.A.loc[3] = 2.66666667
-        expected.A.loc[13] = 5.76923076
+        expected.loc[3, "A"] = 2.66666667
+        expected.loc[13, "A"] = 5.76923076
         tm.assert_frame_equal(result, expected)
 
         result = df.interpolate(method="cubic")
         # GH #15662.
-        expected.A.loc[3] = 2.81547781
-        expected.A.loc[13] = 5.52964175
+        expected.loc[3, "A"] = 2.81547781
+        expected.loc[13, "A"] = 5.52964175
         tm.assert_frame_equal(result, expected)
 
         result = df.interpolate(method="nearest")
-        expected.A.loc[3] = 2
-        expected.A.loc[13] = 5
+        expected.loc[3, "A"] = 2
+        expected.loc[13, "A"] = 5
         tm.assert_frame_equal(result, expected, check_dtype=False)
 
         result = df.interpolate(method="quadratic")
-        expected.A.loc[3] = 2.82150771
-        expected.A.loc[13] = 6.12648668
+        expected.loc[3, "A"] = 2.82150771
+        expected.loc[13, "A"] = 6.12648668
         tm.assert_frame_equal(result, expected)
 
         result = df.interpolate(method="slinear")
-        expected.A.loc[3] = 2.66666667
-        expected.A.loc[13] = 5.76923077
+        expected.loc[3, "A"] = 2.66666667
+        expected.loc[13, "A"] = 5.76923077
         tm.assert_frame_equal(result, expected)
 
         result = df.interpolate(method="zero")
-        expected.A.loc[3] = 2.0
-        expected.A.loc[13] = 5
+        expected.loc[3, "A"] = 2.0
+        expected.loc[13, "A"] = 5
         tm.assert_frame_equal(result, expected, check_dtype=False)
 
-    @td.skip_if_no_scipy
     def test_interp_alt_scipy(self):
+        pytest.importorskip("scipy")
         df = DataFrame(
             {"A": [1, 2, np.nan, 4, 5, np.nan, 7], "C": [1, 2, 3, 5, 8, 13, 21]}
         )
@@ -120,7 +253,9 @@ class TestDataFrameInterpolate:
         expected.loc[5, "A"] = 6
         tm.assert_frame_equal(result, expected)
 
-        result = df.interpolate(method="barycentric", downcast="infer")
+        msg = "The 'downcast' keyword in DataFrame.interpolate is deprecated"
+        with tm.assert_produces_warning(FutureWarning, match=msg):
+            result = df.interpolate(method="barycentric", downcast="infer")
         tm.assert_frame_equal(result, expected.astype(np.int64))
 
         result = df.interpolate(method="krogh")
@@ -187,7 +322,7 @@ class TestDataFrameInterpolate:
         # TODO: assert something?
 
     @pytest.mark.parametrize(
-        "check_scipy", [False, pytest.param(True, marks=td.skip_if_no_scipy)]
+        "check_scipy", [False, pytest.param(True, marks=td.skip_if_no("scipy"))]
     )
     def test_interp_leading_nans(self, check_scipy):
         df = DataFrame(
@@ -195,14 +330,14 @@ class TestDataFrameInterpolate:
         )
         result = df.interpolate()
         expected = df.copy()
-        expected["B"].loc[3] = -3.75
+        expected.loc[3, "B"] = -3.75
         tm.assert_frame_equal(result, expected)
 
         if check_scipy:
             result = df.interpolate(method="polynomial", order=1)
             tm.assert_frame_equal(result, expected)
 
-    def test_interp_raise_on_only_mixed(self):
+    def test_interp_raise_on_only_mixed(self, axis):
         df = DataFrame(
             {
                 "A": [1, 2, np.nan, 4],
@@ -212,8 +347,13 @@ class TestDataFrameInterpolate:
                 "E": [1, 2, 3, 4],
             }
         )
-        with pytest.raises(TypeError):
-            df.interpolate(axis=1)
+        msg = (
+            "Cannot interpolate with all object-dtype columns "
+            "in the DataFrame. Try setting at least one "
+            "column to a numeric dtype."
+        )
+        with pytest.raises(TypeError, match=msg):
+            df.astype("object").interpolate(axis=axis)
 
     def test_interp_raise_on_all_object_dtype(self):
         # GH 22985
@@ -226,16 +366,38 @@ class TestDataFrameInterpolate:
         with pytest.raises(TypeError, match=msg):
             df.interpolate()
 
-    def test_interp_inplace(self):
+    def test_interp_inplace(self, using_copy_on_write):
         df = DataFrame({"a": [1.0, 2.0, np.nan, 4.0]})
         expected = DataFrame({"a": [1.0, 2.0, 3.0, 4.0]})
+        expected_cow = df.copy()
         result = df.copy()
-        result["a"].interpolate(inplace=True)
-        tm.assert_frame_equal(result, expected)
+
+        if using_copy_on_write:
+            with tm.raises_chained_assignment_error():
+                return_value = result["a"].interpolate(inplace=True)
+            assert return_value is None
+            tm.assert_frame_equal(result, expected_cow)
+        else:
+            with tm.assert_produces_warning(FutureWarning, match="inplace method"):
+                return_value = result["a"].interpolate(inplace=True)
+            assert return_value is None
+            tm.assert_frame_equal(result, expected)
 
         result = df.copy()
-        result["a"].interpolate(inplace=True, downcast="infer")
-        tm.assert_frame_equal(result, expected.astype("int64"))
+        msg = "The 'downcast' keyword in Series.interpolate is deprecated"
+
+        if using_copy_on_write:
+            with tm.assert_produces_warning(
+                (FutureWarning, ChainedAssignmentError), match=msg
+            ):
+                return_value = result["a"].interpolate(inplace=True, downcast="infer")
+            assert return_value is None
+            tm.assert_frame_equal(result, expected_cow)
+        else:
+            with tm.assert_produces_warning(FutureWarning, match=msg):
+                return_value = result["a"].interpolate(inplace=True, downcast="infer")
+            assert return_value is None
+            tm.assert_frame_equal(result, expected.astype("int64"))
 
     def test_interp_inplace_row(self):
         # GH 10395
@@ -243,7 +405,8 @@ class TestDataFrameInterpolate:
             {"a": [1.0, 2.0, 3.0, 4.0], "b": [np.nan, 2.0, 3.0, 4.0], "c": [3, 2, 2, 2]}
         )
         expected = result.interpolate(method="linear", axis=1, inplace=False)
-        result.interpolate(method="linear", axis=1, inplace=True)
+        return_value = result.interpolate(method="linear", axis=1, inplace=True)
+        assert return_value is None
         tm.assert_frame_equal(result, expected)
 
     def test_interp_ignore_all_good(self):
@@ -265,22 +428,79 @@ class TestDataFrameInterpolate:
             }
         )
 
-        result = df.interpolate(downcast=None)
+        msg = "The 'downcast' keyword in DataFrame.interpolate is deprecated"
+        with tm.assert_produces_warning(FutureWarning, match=msg):
+            result = df.interpolate(downcast=None)
         tm.assert_frame_equal(result, expected)
 
         # all good
-        result = df[["B", "D"]].interpolate(downcast=None)
+        with tm.assert_produces_warning(FutureWarning, match=msg):
+            result = df[["B", "D"]].interpolate(downcast=None)
         tm.assert_frame_equal(result, df[["B", "D"]])
 
-    @pytest.mark.parametrize("axis", [0, 1])
-    def test_interp_time_inplace_axis(self, axis):
+    def test_interp_time_inplace_axis(self):
         # GH 9687
         periods = 5
         idx = date_range(start="2014-01-01", periods=periods)
-        data = np.random.rand(periods, periods)
+        data = np.random.default_rng(2).random((periods, periods))
         data[data < 0.5] = np.nan
         expected = DataFrame(index=idx, columns=idx, data=data)
 
         result = expected.interpolate(axis=0, method="time")
-        expected.interpolate(axis=0, method="time", inplace=True)
+        return_value = expected.interpolate(axis=0, method="time", inplace=True)
+        assert return_value is None
         tm.assert_frame_equal(result, expected)
+
+    @pytest.mark.parametrize("axis_name, axis_number", [("index", 0), ("columns", 1)])
+    def test_interp_string_axis(self, axis_name, axis_number):
+        # https://github.com/pandas-dev/pandas/issues/25190
+        x = np.linspace(0, 100, 1000)
+        y = np.sin(x)
+        df = DataFrame(
+            data=np.tile(y, (10, 1)), index=np.arange(10), columns=x
+        ).reindex(columns=x * 1.005)
+        result = df.interpolate(method="linear", axis=axis_name)
+        expected = df.interpolate(method="linear", axis=axis_number)
+        tm.assert_frame_equal(result, expected)
+
+    @pytest.mark.parametrize("multiblock", [True, False])
+    @pytest.mark.parametrize("method", ["ffill", "bfill", "pad"])
+    def test_interp_fillna_methods(
+        self, request, axis, multiblock, method, using_array_manager
+    ):
+        # GH 12918
+        if using_array_manager and axis in (1, "columns"):
+            # TODO(ArrayManager) support axis=1
+            td.mark_array_manager_not_yet_implemented(request)
+
+        df = DataFrame(
+            {
+                "A": [1.0, 2.0, 3.0, 4.0, np.nan, 5.0],
+                "B": [2.0, 4.0, 6.0, np.nan, 8.0, 10.0],
+                "C": [3.0, 6.0, 9.0, np.nan, np.nan, 30.0],
+            }
+        )
+        if multiblock:
+            df["D"] = np.nan
+            df["E"] = 1.0
+
+        method2 = method if method != "pad" else "ffill"
+        expected = getattr(df, method2)(axis=axis)
+        msg = f"DataFrame.interpolate with method={method} is deprecated"
+        with tm.assert_produces_warning(FutureWarning, match=msg):
+            result = df.interpolate(method=method, axis=axis)
+        tm.assert_frame_equal(result, expected)
+
+    def test_interpolate_empty_df(self):
+        # GH#53199
+        df = DataFrame()
+        expected = df.copy()
+        result = df.interpolate(inplace=True)
+        assert result is None
+        tm.assert_frame_equal(df, expected)
+
+    def test_interpolate_ea_raise(self):
+        # GH#55347
+        df = DataFrame({"a": [1, None, 2]}, dtype="Int64")
+        with pytest.raises(NotImplementedError, match="does not implement"):
+            df.interpolate()

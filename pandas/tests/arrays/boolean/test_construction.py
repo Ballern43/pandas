@@ -1,20 +1,10 @@
 import numpy as np
 import pytest
 
-import pandas.util._test_decorators as td
-
 import pandas as pd
 import pandas._testing as tm
 from pandas.arrays import BooleanArray
 from pandas.core.arrays.boolean import coerce_to_array
-
-
-@pytest.fixture
-def data():
-    return pd.array(
-        [True, False] * 4 + [np.nan] + [True, False] * 44 + [np.nan] + [True, False],
-        dtype="boolean",
-    )
 
 
 def test_boolean_array_constructor():
@@ -37,10 +27,10 @@ def test_boolean_array_constructor():
     with pytest.raises(TypeError, match="mask should be boolean numpy array"):
         BooleanArray(values, None)
 
-    with pytest.raises(ValueError, match="values must be a 1D array"):
+    with pytest.raises(ValueError, match="values.shape must match mask.shape"):
         BooleanArray(values.reshape(1, -1), mask)
 
-    with pytest.raises(ValueError, match="mask must be a 1D array"):
+    with pytest.raises(ValueError, match="values.shape must match mask.shape"):
         BooleanArray(values, mask.reshape(1, -1))
 
 
@@ -193,10 +183,13 @@ def test_coerce_to_array():
     values = np.array([True, False, True, False], dtype="bool")
     mask = np.array([False, False, False, True], dtype="bool")
 
-    with pytest.raises(ValueError, match="values must be a 1D list-like"):
-        coerce_to_array(values.reshape(1, -1))
+    # passing 2D values is OK as long as no mask
+    coerce_to_array(values.reshape(1, -1))
 
-    with pytest.raises(ValueError, match="mask must be a 1D list-like"):
+    with pytest.raises(ValueError, match="values.shape and mask.shape must match"):
+        coerce_to_array(values.reshape(1, -1), mask=mask)
+
+    with pytest.raises(ValueError, match="values.shape and mask.shape must match"):
         coerce_to_array(values, mask=mask.reshape(1, -1))
 
 
@@ -230,7 +223,7 @@ def test_coerce_to_numpy_array():
     # also with no missing values -> object dtype
     arr = pd.array([True, False, True], dtype="boolean")
     result = np.array(arr)
-    expected = np.array([True, False, True], dtype="object")
+    expected = np.array([True, False, True], dtype="bool")
     tm.assert_numpy_array_equal(result, expected)
 
     # force bool dtype
@@ -249,10 +242,11 @@ def test_coerce_to_numpy_array():
 
 def test_to_boolean_array_from_strings():
     result = BooleanArray._from_sequence_of_strings(
-        np.array(["True", "False", np.nan], dtype=object)
+        np.array(["True", "False", "1", "1.0", "0", "0.0", np.nan], dtype=object)
     )
     expected = BooleanArray(
-        np.array([True, False, False]), np.array([False, False, True])
+        np.array([True, False, True, True, False, False, False]),
+        np.array([False, False, False, False, False, False, True]),
     )
 
     tm.assert_extension_array_equal(result, expected)
@@ -269,7 +263,7 @@ def test_to_numpy(box):
     # default (with or without missing values) -> object dtype
     arr = con([True, False, True], dtype="boolean")
     result = arr.to_numpy()
-    expected = np.array([True, False, True], dtype="object")
+    expected = np.array([True, False, True], dtype="bool")
     tm.assert_numpy_array_equal(result, expected)
 
     arr = con([True, False, None], dtype="boolean")
@@ -279,7 +273,7 @@ def test_to_numpy(box):
 
     arr = con([True, False, None], dtype="boolean")
     result = arr.to_numpy(dtype="str")
-    expected = np.array([True, False, pd.NA], dtype="<U5")
+    expected = np.array([True, False, pd.NA], dtype=f"{tm.ENDIAN}U5")
     tm.assert_numpy_array_equal(result, expected)
 
     # no missing values -> can convert to bool, otherwise raises
@@ -330,47 +324,3 @@ def test_to_numpy_copy():
     result = arr.to_numpy(dtype=bool, copy=True)
     result[0] = False
     tm.assert_extension_array_equal(arr, pd.array([True, False, True], dtype="boolean"))
-
-
-# FIXME: don't leave commented out
-# TODO when BooleanArray coerces to object dtype numpy array, need to do conversion
-# manually in the indexing code
-# def test_indexing_boolean_mask():
-#     arr = pd.array([1, 2, 3, 4], dtype="Int64")
-#     mask = pd.array([True, False, True, False], dtype="boolean")
-#     result = arr[mask]
-#     expected = pd.array([1, 3], dtype="Int64")
-#     tm.assert_extension_array_equal(result, expected)
-
-#     # missing values -> error
-#     mask = pd.array([True, False, True, None], dtype="boolean")
-#     with pytest.raises(IndexError):
-#         result = arr[mask]
-
-
-@td.skip_if_no("pyarrow", min_version="0.15.0")
-def test_arrow_array(data):
-    # protocol added in 0.15.0
-    import pyarrow as pa
-
-    arr = pa.array(data)
-
-    # TODO use to_numpy(na_value=None) here
-    data_object = np.array(data, dtype=object)
-    data_object[data.isna()] = None
-    expected = pa.array(data_object, type=pa.bool_(), from_pandas=True)
-    assert arr.equals(expected)
-
-
-@td.skip_if_no("pyarrow", min_version="0.15.1.dev")
-def test_arrow_roundtrip():
-    # roundtrip possible from arrow 1.0.0
-    import pyarrow as pa
-
-    data = pd.array([True, False, None], dtype="boolean")
-    df = pd.DataFrame({"a": data})
-    table = pa.table(df)
-    assert table.field("a").type == "bool"
-    result = table.to_pandas()
-    assert isinstance(result["a"].dtype, pd.BooleanDtype)
-    tm.assert_frame_equal(result, df)

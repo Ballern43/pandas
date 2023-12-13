@@ -3,12 +3,92 @@
 {{ header }}
 
 *************
-Release Notes
+Release notes
 *************
 
 This is the list of changes to pandas between each release. For full details,
 see the `commit logs <https://github.com/pandas-dev/pandas/commits/>`_. For install and
 upgrade instructions, see :ref:`install`.
+
+Version 2.2
+-----------
+
+.. toctree::
+   :maxdepth: 2
+
+   v2.2.0
+
+Version 2.1
+-----------
+
+.. toctree::
+   :maxdepth: 2
+
+   v2.1.4
+   v2.1.3
+   v2.1.2
+   v2.1.1
+   v2.1.0
+
+Version 2.0
+-----------
+
+.. toctree::
+   :maxdepth: 2
+
+   v2.0.3
+   v2.0.2
+   v2.0.1
+   v2.0.0
+
+Version 1.5
+-----------
+
+.. toctree::
+   :maxdepth: 2
+
+   v1.5.3
+   v1.5.2
+   v1.5.1
+   v1.5.0
+
+Version 1.4
+-----------
+
+.. toctree::
+   :maxdepth: 2
+
+   v1.4.4
+   v1.4.3
+   v1.4.2
+   v1.4.1
+   v1.4.0
+
+Version 1.3
+-----------
+
+.. toctree::
+   :maxdepth: 2
+
+   v1.3.5
+   v1.3.4
+   v1.3.3
+   v1.3.2
+   v1.3.1
+   v1.3.0
+
+Version 1.2
+-----------
+
+.. toctree::
+   :maxdepth: 2
+
+   v1.2.5
+   v1.2.4
+   v1.2.3
+   v1.2.2
+   v1.2.1
+   v1.2.0
 
 Version 1.1
 -----------
@@ -16,6 +96,11 @@ Version 1.1
 .. toctree::
    :maxdepth: 2
 
+   v1.1.5
+   v1.1.4
+   v1.1.3
+   v1.1.2
+   v1.1.1
    v1.1.0
 
 Version 1.0
@@ -24,6 +109,8 @@ Version 1.0
 .. toctree::
    :maxdepth: 2
 
+   v1.0.5
+   v1.0.4
    v1.0.3
    v1.0.2
    v1.0.1

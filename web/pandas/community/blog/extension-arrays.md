@@ -117,11 +117,11 @@ library). For example, consider `Categorical`,
 1    b
 2    a
 dtype: category
-Categories (3, object): [a, b, c]
+Categories (3, object): ['a', 'b', 'c']
 
 >>> ser.values
 [a, b, a]
-Categories (3, object): [a, b, c]
+Categories (3, object): ['a', 'b', 'c']
 ```
 
 In this case `.values` is a Categorical, not a NumPy array. For period-dtype
@@ -143,7 +143,7 @@ So with our Categorical example,
 ```python
 >>> ser.array
 [a, b, a]
-Categories (3, object): [a, b, c]
+Categories (3, object): ['a', 'b', 'c']
 
 >>> ser.to_numpy()
 array(['a', 'b', 'a'], dtype=object)
@@ -207,12 +207,12 @@ partners][partners] involved in the pandas community.
 [IntegerArray]: http://pandas.pydata.org/pandas-docs/version/0.24/reference/api/pandas.arrays.IntegerArray.html
 [fletcher]: https://github.com/xhochy/fletcher
 [arrow]: https://arrow.apache.org
-[ufunc]: https://docs.scipy.org/doc/numpy-1.13.0/neps/ufunc-overrides.html
+[ufunc]: https://numpy.org/neps/nep-0013-ufunc-overrides.html
 [nep18]: https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 [ml]: https://mail.python.org/mailman/listinfo/pandas-dev
 [twitter]: https://twitter.com/pandas_dev
 [tracker]: https://github.com/pandas-dev/pandas/issues
-[partners]: https://github.com/pandas-dev/pandas-governance/blob/master/people.md
+[partners]: https://pandas.pydata.org/about/sponsors.html
 [eco]: http://pandas.pydata.org/pandas-docs/stable/ecosystem.html#extension-data-types
 [whatsnew]: http://pandas.pydata.org/pandas-docs/version/0.24/whatsnew/v0.24.0.html
 [geopandas]: https://github.com/geopandas/geopandas

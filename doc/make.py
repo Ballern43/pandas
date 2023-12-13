@@ -39,22 +39,28 @@ class DocBuilder:
 
     def __init__(
         self,
-        num_jobs=0,
+        num_jobs="auto",
         include_api=True,
+        whatsnew=False,
         single_doc=None,
         verbosity=0,
         warnings_are_errors=False,
-    ):
+        no_browser=False,
+    ) -> None:
         self.num_jobs = num_jobs
+        self.include_api = include_api
+        self.whatsnew = whatsnew
         self.verbosity = verbosity
         self.warnings_are_errors = warnings_are_errors
+        self.no_browser = no_browser
 
         if single_doc:
             single_doc = self._process_single_doc(single_doc)
-            include_api = False
             os.environ["SPHINX_PATTERN"] = single_doc
         elif not include_api:
             os.environ["SPHINX_PATTERN"] = "-api"
+        elif whatsnew:
+            os.environ["SPHINX_PATTERN"] = "whatsnew"
 
         self.single_doc_html = None
         if single_doc and single_doc.endswith(".rst"):
@@ -119,18 +125,18 @@ class DocBuilder:
 
         Parameters
         ----------
-        kind : {'html', 'latex'}
+        kind : {'html', 'latex', 'linkcheck'}
 
         Examples
         --------
         >>> DocBuilder(num_jobs=4)._sphinx_build('html')
         """
-        if kind not in ("html", "latex"):
-            raise ValueError(f"kind must be html or latex, not {kind}")
+        if kind not in ("html", "latex", "linkcheck"):
+            raise ValueError(f"kind must be html, latex or linkcheck, not {kind}")
 
         cmd = ["sphinx-build", "-b", kind]
         if self.num_jobs:
-            cmd += ["-j", str(self.num_jobs)]
+            cmd += ["-j", self.num_jobs]
         if self.warnings_are_errors:
             cmd += ["-W", "--keep-going"]
         if self.verbosity:
@@ -155,16 +161,16 @@ class DocBuilder:
         Open the rst file `page` and extract its title.
         """
         fname = os.path.join(SOURCE_PATH, f"{page}.rst")
-        option_parser = docutils.frontend.OptionParser(
-            components=(docutils.parsers.rst.Parser,)
+        doc = docutils.utils.new_document(
+            "<doc>",
+            docutils.frontend.get_default_settings(docutils.parsers.rst.Parser),
         )
-        doc = docutils.utils.new_document("<doc>", option_parser.get_default_values())
-        with open(fname) as f:
+        with open(fname, encoding="utf-8") as f:
             data = f.read()
 
         parser = docutils.parsers.rst.Parser()
         # do not generate any warning when parsing the rst
-        with open(os.devnull, "a") as f:
+        with open(os.devnull, "a", encoding="utf-8") as f:
             doc.reporter.stream = f
             parser.parse(data, doc)
 
@@ -182,13 +188,20 @@ class DocBuilder:
         Create in the build directory an html file with a redirect,
         for every row in REDIRECTS_FILE.
         """
-        with open(REDIRECTS_FILE) as mapping_fd:
+        with open(REDIRECTS_FILE, encoding="utf-8") as mapping_fd:
             reader = csv.reader(mapping_fd)
             for row in reader:
                 if not row or row[0].strip().startswith("#"):
                     continue
 
-                path = os.path.join(BUILD_PATH, "html", *row[0].split("/")) + ".html"
+                html_path = os.path.join(BUILD_PATH, "html")
+                path = os.path.join(html_path, *row[0].split("/")) + ".html"
+
+                if not self.include_api and (
+                    os.path.join(html_path, "reference") in path
+                    or os.path.join(html_path, "generated") in path
+                ):
+                    continue
 
                 try:
                     title = self._get_page_title(row[1])
@@ -198,12 +211,7 @@ class DocBuilder:
                     # sphinx specific stuff
                     title = "this page"
 
-                if os.path.exists(path):
-                    raise RuntimeError(
-                        f"Redirection would overwrite an existing file: {path}"
-                    )
-
-                with open(path, "w") as moved_page_fd:
+                with open(path, "w", encoding="utf-8") as moved_page_fd:
                     html = f"""\
 <html>
     <head>
@@ -228,10 +236,13 @@ class DocBuilder:
             os.remove(zip_fname)
 
         if ret_code == 0:
-            if self.single_doc_html is not None:
+            if self.single_doc_html is not None and not self.no_browser:
                 self._open_browser(self.single_doc_html)
             else:
                 self._add_redirects()
+                if self.whatsnew and not self.no_browser:
+                    self._open_browser(os.path.join("whatsnew", "index.html"))
+
         return ret_code
 
     def latex(self, force=False):
@@ -250,8 +261,7 @@ class DocBuilder:
                     "You should check the file "
                     '"build/latex/pandas.pdf" for problems.'
                 )
-            else:
-                self._run_os("make")
+            self._run_os("make")
             return ret_code
 
     def latex_forced(self):
@@ -280,24 +290,36 @@ class DocBuilder:
         os.chdir(dirname)
         self._run_os("zip", zip_fname, "-r", "-q", *fnames)
 
+    def linkcheck(self):
+        """
+        Check for broken links in the documentation.
+        """
+        return self._sphinx_build("linkcheck")
+
 
 def main():
     cmds = [method for method in dir(DocBuilder) if not method.startswith("_")]
 
     joined = ",".join(cmds)
     argparser = argparse.ArgumentParser(
-        description="pandas documentation builder", epilog=f"Commands: {joined}",
+        description="pandas documentation builder", epilog=f"Commands: {joined}"
     )
 
     joined = ", ".join(cmds)
     argparser.add_argument(
-        "command", nargs="?", default="html", help=f"command to run: {joined}",
+        "command", nargs="?", default="html", help=f"command to run: {joined}"
     )
     argparser.add_argument(
-        "--num-jobs", type=int, default=0, help="number of jobs used by sphinx-build"
+        "--num-jobs", default="auto", help="number of jobs used by sphinx-build"
     )
     argparser.add_argument(
         "--no-api", default=False, help="omit api and autosummary", action="store_true"
+    )
+    argparser.add_argument(
+        "--whatsnew",
+        default=False,
+        help="only build whatsnew (and api for links)",
+        action="store_true",
     )
     argparser.add_argument(
         "--single",
@@ -307,7 +329,7 @@ def main():
         help=(
             "filename (relative to the 'source' folder) of section or method name to "
             "compile, e.g. 'development/contributing.rst', "
-            "'ecosystem.rst', 'pandas.DataFrame.join'"
+            "'pandas.DataFrame.join'"
         ),
     )
     argparser.add_argument(
@@ -328,6 +350,12 @@ def main():
         "-W",
         action="store_true",
         help="fail if warnings are raised",
+    )
+    argparser.add_argument(
+        "--no-browser",
+        help="Don't open browser",
+        default=False,
+        action="store_true",
     )
     args = argparser.parse_args()
 
@@ -350,9 +378,11 @@ def main():
     builder = DocBuilder(
         args.num_jobs,
         not args.no_api,
+        args.whatsnew,
         args.single,
         args.verbosity,
         args.warnings_are_errors,
+        args.no_browser,
     )
     return getattr(builder, args.command)()
 

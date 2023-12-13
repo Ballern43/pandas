@@ -2,12 +2,12 @@ import io
 import textwrap
 
 import pytest
-import validate_docstrings
+
+from scripts import validate_docstrings
 
 
 class BadDocstrings:
-    """Everything here has a bad docstring
-    """
+    """Everything here has a bad docstring"""
 
     def private_classes(self):
         """
@@ -23,9 +23,8 @@ class BadDocstrings:
         pandas.Series.rename : Alter Series index labels or name.
         DataFrame.head : The first `n` rows of the caller object.
         """
-        pass
 
-    def redundant_import(self, foo=None, bar=None):
+    def redundant_import(self, paramx=None, paramy=None):
         """
         A sample DataFrame method.
 
@@ -45,7 +44,6 @@ class BadDocstrings:
         >>> df.all(bool_only=True)
         Series([], dtype: bool)
         """
-        pass
 
     def unused_import(self):
         """
@@ -54,7 +52,6 @@ class BadDocstrings:
         >>> import pandas as pdf
         >>> df = pd.DataFrame(np.ones((3, 3)), columns=('a', 'b', 'c'))
         """
-        pass
 
     def missing_whitespace_around_arithmetic_operator(self):
         """
@@ -63,7 +60,6 @@ class BadDocstrings:
         >>> 2+5
         7
         """
-        pass
 
     def indentation_is_not_a_multiple_of_four(self):
         """
@@ -72,7 +68,6 @@ class BadDocstrings:
         >>> if 2 + 5:
         ...   pass
         """
-        pass
 
     def missing_whitespace_after_comma(self):
         """
@@ -80,7 +75,19 @@ class BadDocstrings:
         --------
         >>> df = pd.DataFrame(np.ones((3,3)),columns=('a','b', 'c'))
         """
-        pass
+
+    def write_array_like_with_hyphen_not_underscore(self):
+        """
+        In docstrings, use array-like over array_like
+        """
+
+    def leftover_files(self):
+        """
+        Examples
+        --------
+        >>> import pathlib
+        >>> pathlib.Path("foo.txt").touch()
+        """
 
 
 class TestValidator:
@@ -103,10 +110,10 @@ class TestValidator:
         base_path = "scripts.tests.test_validate_docstrings"
 
         if klass:
-            base_path = ".".join([base_path, klass])
+            base_path = f"{base_path}.{klass}"
 
         if func:
-            base_path = ".".join([base_path, func])
+            base_path = f"{base_path}.{func}"
 
         return base_path
 
@@ -150,25 +157,38 @@ class TestValidator:
             (
                 "BadDocstrings",
                 "unused_import",
-                ("flake8 error: F401 'pandas as pdf' imported but unused",),
+                (
+                    "flake8 error: line 1, col 1: F401 'pandas as pdf' "
+                    "imported but unused",
+                ),
             ),
             (
                 "BadDocstrings",
                 "missing_whitespace_around_arithmetic_operator",
                 (
-                    "flake8 error: "
+                    "flake8 error: line 1, col 2: "
                     "E226 missing whitespace around arithmetic operator",
                 ),
             ),
             (
                 "BadDocstrings",
                 "indentation_is_not_a_multiple_of_four",
-                ("flake8 error: E111 indentation is not a multiple of four",),
+                # with flake8 3.9.0, the message ends with four spaces,
+                #  whereas in earlier versions, it ended with "four"
+                (
+                    "flake8 error: line 2, col 3: E111 indentation is not a "
+                    "multiple of 4",
+                ),
             ),
             (
                 "BadDocstrings",
                 "missing_whitespace_after_comma",
-                ("flake8 error: E231 missing whitespace after ',' (3 times)",),
+                ("flake8 error: line 1, col 33: E231 missing whitespace after ','",),
+            ),
+            (
+                "BadDocstrings",
+                "write_array_like_with_hyphen_not_underscore",
+                ("Use 'array-like' rather than 'array_like' in docstrings",),
             ),
         ],
     )
@@ -177,7 +197,39 @@ class TestValidator:
             self._import_path(klass=klass, func=func)
         )
         for msg in msgs:
-            assert msg in " ".join(err[1] for err in result["errors"])
+            assert msg in " ".join([err[1] for err in result["errors"]])
+
+    def test_leftover_files_raises(self):
+        with pytest.raises(Exception, match="The following files"):
+            validate_docstrings.pandas_validate(
+                self._import_path(klass="BadDocstrings", func="leftover_files")
+            )
+
+    def test_validate_all_ignore_functions(self, monkeypatch):
+        monkeypatch.setattr(
+            validate_docstrings,
+            "get_all_api_items",
+            lambda: [
+                (
+                    "pandas.DataFrame.align",
+                    "func",
+                    "current_section",
+                    "current_subsection",
+                ),
+                (
+                    "pandas.Index.all",
+                    "func",
+                    "current_section",
+                    "current_subsection",
+                ),
+            ],
+        )
+        result = validate_docstrings.validate_all(
+            prefix=None,
+            ignore_functions=["pandas.DataFrame.align"],
+        )
+        assert len(result) == 1
+        assert "pandas.Index.all" in result
 
     def test_validate_all_ignore_deprecated(self, monkeypatch):
         monkeypatch.setattr(
@@ -319,6 +371,7 @@ class TestMainFunction:
             errors=[],
             output_format="default",
             ignore_deprecated=False,
+            ignore_functions=None,
         )
         assert exit_status == 0
 
@@ -326,7 +379,7 @@ class TestMainFunction:
         monkeypatch.setattr(
             validate_docstrings,
             "validate_all",
-            lambda prefix, ignore_deprecated=False: {
+            lambda prefix, ignore_deprecated=False, ignore_functions=None: {
                 "docstring1": {
                     "errors": [
                         ("ER01", "err desc"),
@@ -349,6 +402,7 @@ class TestMainFunction:
             errors=[],
             output_format="default",
             ignore_deprecated=False,
+            ignore_functions=None,
         )
         assert exit_status == 5
 
@@ -356,7 +410,7 @@ class TestMainFunction:
         monkeypatch.setattr(
             validate_docstrings,
             "validate_all",
-            lambda prefix, ignore_deprecated=False: {
+            lambda prefix, ignore_deprecated=False, ignore_functions=None: {
                 "docstring1": {"errors": [], "warnings": [("WN01", "warn desc")]},
                 "docstring2": {"errors": []},
             },
@@ -367,6 +421,7 @@ class TestMainFunction:
             errors=[],
             output_format="default",
             ignore_deprecated=False,
+            ignore_functions=None,
         )
         assert exit_status == 0
 
@@ -375,7 +430,7 @@ class TestMainFunction:
         monkeypatch.setattr(
             validate_docstrings,
             "validate_all",
-            lambda prefix, ignore_deprecated=False: {
+            lambda prefix, ignore_deprecated=False, ignore_functions=None: {
                 "docstring1": {
                     "errors": [
                         ("ER01", "err desc"),
@@ -392,6 +447,7 @@ class TestMainFunction:
             errors=[],
             output_format="json",
             ignore_deprecated=False,
+            ignore_functions=None,
         )
         assert exit_status == 0
 
@@ -399,7 +455,7 @@ class TestMainFunction:
         monkeypatch.setattr(
             validate_docstrings,
             "validate_all",
-            lambda prefix, ignore_deprecated=False: {
+            lambda prefix, ignore_deprecated=False, ignore_functions=None: {
                 "Series.foo": {
                     "errors": [
                         ("ER01", "err desc"),
@@ -427,6 +483,7 @@ class TestMainFunction:
             errors=["ER01"],
             output_format="default",
             ignore_deprecated=False,
+            ignore_functions=None,
         )
         assert exit_status == 3
 
@@ -436,5 +493,6 @@ class TestMainFunction:
             errors=["ER03"],
             output_format="default",
             ignore_deprecated=False,
+            ignore_functions=None,
         )
         assert exit_status == 1

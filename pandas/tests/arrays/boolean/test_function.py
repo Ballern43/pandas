@@ -5,14 +5,6 @@ import pandas as pd
 import pandas._testing as tm
 
 
-@pytest.fixture
-def data():
-    return pd.array(
-        [True, False] * 4 + [np.nan] + [True, False] * 44 + [np.nan] + [True, False],
-        dtype="boolean",
-    )
-
-
 @pytest.mark.parametrize(
     "ufunc", [np.add, np.logical_or, np.logical_and, np.logical_xor]
 )
@@ -54,7 +46,8 @@ def test_ufuncs_binary(ufunc):
     tm.assert_extension_array_equal(result, expected)
 
     # not handled types
-    with pytest.raises(TypeError):
+    msg = r"operand type\(s\) all returned NotImplemented from __array_ufunc__"
+    with pytest.raises(TypeError, match=msg):
         ufunc(a, "test")
 
 
@@ -66,28 +59,54 @@ def test_ufuncs_unary(ufunc):
     expected[a._mask] = np.nan
     tm.assert_extension_array_equal(result, expected)
 
-    s = pd.Series(a)
-    result = ufunc(s)
+    ser = pd.Series(a)
+    result = ufunc(ser)
     expected = pd.Series(ufunc(a._data), dtype="boolean")
     expected[a._mask] = np.nan
     tm.assert_series_equal(result, expected)
 
 
+def test_ufunc_numeric():
+    # np.sqrt on np.bool_ returns float16, which we upcast to Float32
+    #  bc we do not have Float16
+    arr = pd.array([True, False, None], dtype="boolean")
+
+    res = np.sqrt(arr)
+
+    expected = pd.array([1, 0, None], dtype="Float32")
+    tm.assert_extension_array_equal(res, expected)
+
+
 @pytest.mark.parametrize("values", [[True, False], [True, None]])
 def test_ufunc_reduce_raises(values):
-    a = pd.array(values, dtype="boolean")
-    with pytest.raises(NotImplementedError):
-        np.add.reduce(a)
+    arr = pd.array(values, dtype="boolean")
+
+    res = np.add.reduce(arr)
+    if arr[-1] is pd.NA:
+        expected = pd.NA
+    else:
+        expected = arr._data.sum()
+    tm.assert_almost_equal(res, expected)
 
 
 def test_value_counts_na():
     arr = pd.array([True, False, pd.NA], dtype="boolean")
     result = arr.value_counts(dropna=False)
-    expected = pd.Series([1, 1, 1], index=[True, False, pd.NA], dtype="Int64")
+    expected = pd.Series([1, 1, 1], index=arr, dtype="Int64", name="count")
+    assert expected.index.dtype == arr.dtype
     tm.assert_series_equal(result, expected)
 
     result = arr.value_counts(dropna=True)
-    expected = pd.Series([1, 1], index=[True, False], dtype="Int64")
+    expected = pd.Series([1, 1], index=arr[:-1], dtype="Int64", name="count")
+    assert expected.index.dtype == arr.dtype
+    tm.assert_series_equal(result, expected)
+
+
+def test_value_counts_with_normalize():
+    ser = pd.Series([True, False, pd.NA], dtype="boolean")
+    result = ser.value_counts(normalize=True)
+    expected = pd.Series([1, 1], index=ser[:-1], dtype="Float64", name="proportion") / 2
+    assert expected.index.dtype == "boolean"
     tm.assert_series_equal(result, expected)
 
 
@@ -101,7 +120,7 @@ def test_diff():
     )
     tm.assert_extension_array_equal(result, expected)
 
-    s = pd.Series(a)
-    result = s.diff()
+    ser = pd.Series(a)
+    result = ser.diff()
     expected = pd.Series(expected)
     tm.assert_series_equal(result, expected)

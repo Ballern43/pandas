@@ -37,6 +37,7 @@ Attributes and underlying data
    DataFrame.shape
    DataFrame.memory_usage
    DataFrame.empty
+   DataFrame.set_flags
 
 Conversion
 ~~~~~~~~~~
@@ -47,8 +48,6 @@ Conversion
    DataFrame.convert_dtypes
    DataFrame.infer_objects
    DataFrame.copy
-   DataFrame.isna
-   DataFrame.notna
    DataFrame.bool
 
 Indexing, iteration
@@ -64,11 +63,9 @@ Indexing, iteration
    DataFrame.insert
    DataFrame.__iter__
    DataFrame.items
-   DataFrame.iteritems
    DataFrame.keys
    DataFrame.iterrows
    DataFrame.itertuples
-   DataFrame.lookup
    DataFrame.pop
    DataFrame.tail
    DataFrame.xs
@@ -86,6 +83,7 @@ Binary operator functions
 .. autosummary::
    :toctree: api/
 
+   DataFrame.__add__
    DataFrame.add
    DataFrame.sub
    DataFrame.mul
@@ -118,6 +116,7 @@ Function application, GroupBy & window
    :toctree: api/
 
    DataFrame.apply
+   DataFrame.map
    DataFrame.applymap
    DataFrame.pipe
    DataFrame.agg
@@ -152,7 +151,6 @@ Computations / descriptive stats
    DataFrame.eval
    DataFrame.kurt
    DataFrame.kurtosis
-   DataFrame.mad
    DataFrame.max
    DataFrame.mean
    DataFrame.median
@@ -211,10 +209,18 @@ Missing data handling
 .. autosummary::
    :toctree: api/
 
+   DataFrame.backfill
+   DataFrame.bfill
    DataFrame.dropna
+   DataFrame.ffill
    DataFrame.fillna
-   DataFrame.replace
    DataFrame.interpolate
+   DataFrame.isna
+   DataFrame.isnull
+   DataFrame.notna
+   DataFrame.notnull
+   DataFrame.pad
+   DataFrame.replace
 
 Reshaping, sorting, transposing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -240,13 +246,13 @@ Reshaping, sorting, transposing
    DataFrame.T
    DataFrame.transpose
 
-Combining / joining / merging
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Combining / comparing / joining / merging
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autosummary::
    :toctree: api/
 
-   DataFrame.append
    DataFrame.assign
+   DataFrame.compare
    DataFrame.join
    DataFrame.merge
    DataFrame.update
@@ -259,8 +265,6 @@ Time Series-related
    DataFrame.asfreq
    DataFrame.asof
    DataFrame.shift
-   DataFrame.slice_shift
-   DataFrame.tshift
    DataFrame.first_valid_index
    DataFrame.last_valid_index
    DataFrame.resample
@@ -268,6 +272,21 @@ Time Series-related
    DataFrame.to_timestamp
    DataFrame.tz_convert
    DataFrame.tz_localize
+
+.. _api.frame.flags:
+
+Flags
+~~~~~
+
+Flags refer to attributes of the pandas object. Properties of the dataset (like
+the date is was recorded, the URL it was accessed from, etc.) should be stored
+in :attr:`DataFrame.attrs`.
+
+.. autosummary::
+   :toctree: api/
+
+   Flags
+
 
 .. _api.frame.metadata:
 
@@ -336,6 +355,7 @@ Sparse-dtype specific methods and attributes are provided under the
 
 .. autosummary::
    :toctree: api/
+   :template: autosummary/accessor_method.rst
 
    DataFrame.sparse.from_spmatrix
    DataFrame.sparse.to_coo
@@ -349,6 +369,7 @@ Serialization / IO / conversion
 
    DataFrame.from_dict
    DataFrame.from_records
+   DataFrame.to_orc
    DataFrame.to_parquet
    DataFrame.to_pickle
    DataFrame.to_csv
@@ -367,3 +388,4 @@ Serialization / IO / conversion
    DataFrame.to_clipboard
    DataFrame.to_markdown
    DataFrame.style
+   DataFrame.__dataframe__
